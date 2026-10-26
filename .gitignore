@@ -1,0 +1,12 @@
+.env
+nas_known_hosts
+preview-output.jpg
+*.tar.gz
+__pycache__/
+*.pyc
+.toolchain/
+archives/
+cchong-jobs/
+android/signing/
+*.jks
+private.properties

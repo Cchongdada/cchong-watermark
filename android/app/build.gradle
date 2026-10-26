@@ -1,0 +1,55 @@
+plugins {
+    id 'com.android.application'
+}
+
+def signingProperties = new Properties()
+def signingFile = rootProject.file('signing/private.properties')
+if (signingFile.exists()) {
+    signingFile.withInputStream { signingProperties.load(it) }
+}
+
+android {
+    namespace 'com.cchong.watermark'
+    compileSdk 36
+    buildToolsVersion '36.0.0'
+
+    defaultConfig {
+        applicationId 'com.cchong.watermark'
+        minSdk 29
+        targetSdk 35
+        versionCode 5
+        versionName '1.4'
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    signingConfigs {
+        release {
+            storeFile rootProject.file('signing/cchong.jks')
+            storePassword signingProperties.getProperty('storePassword', '')
+            keyAlias 'cchong'
+            keyPassword signingProperties.getProperty('keyPassword', '')
+        }
+    }
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.release
+        }
+    }
+}
+
+dependencies {
+    implementation 'androidx.media3:media3-transformer:1.11.1'
+    implementation 'androidx.media3:media3-effect:1.11.1'
+    implementation 'androidx.media3:media3-common:1.11.1'
+    implementation 'androidx.exifinterface:exifinterface:1.4.2'
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.fork = true
+    options.incremental = false
+}
