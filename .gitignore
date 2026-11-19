@@ -10,3 +10,5 @@ cchong-jobs/
 android/signing/
 *.jks
 private.properties
+
+film-preview.jpg

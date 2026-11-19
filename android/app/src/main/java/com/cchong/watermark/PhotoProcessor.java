@@ -71,11 +71,11 @@ final class PhotoProcessor {
                 outputVideo = File.createTempFile("cchong-output-", ".mp4", activity.getCacheDir());
                 Files.write(inputVideo.toPath(), motion.video);
                 if (!outputVideo.delete()) throw new IOException("无法准备视频输出文件");
-                videoWatermarker.render(inputVideo, outputVideo, rendered.overlay);
+                videoWatermarker.render(inputVideo, outputVideo, rendered.overlay, settings.rotation);
                 output = MotionJpeg.join(jpeg, motion, Files.readAllBytes(outputVideo.toPath()));
             } else output = jpeg;
             String stem = originalName.replaceAll("(?i)\\.(jpe?g|png|webp|heic|heif|avif)$", "").replaceAll("[^\\p{L}\\p{N}_ .-]", "_");
-            String name = stem + (motion == null ? "_Cchong.jpg" : "_CchongMP.jpg");
+            String name = stem + (settings.noWatermark ? (motion == null ? "_Upright.jpg" : "_UprightMP.jpg") : motion == null ? "_Cchong.jpg" : "_CchongMP.jpg");
             saveToGallery(name, output);
             return new Saved(name, motion != null);
         } finally {

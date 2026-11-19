@@ -2,6 +2,7 @@ FROM m.daocloud.io/docker.io/library/python:3.12-slim
 RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg fonts-dejavu-core && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY requirements.txt .
+ARG PIP_INDEX_URL=https://pypi.org/simple
 RUN pip install --no-cache-dir -r requirements.txt
 COPY app ./app
 EXPOSE 8080

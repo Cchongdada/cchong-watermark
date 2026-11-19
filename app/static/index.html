@@ -11,33 +11,39 @@
   <script defer src="/app.js"></script>
 </head>
 <body>
-  <header class="topbar"><div class="brand"><span class="brand-mark">C</span><span>Cchong 水印</span></div><span class="local-label">PRIVATE PHOTO STUDIO</span></header>
+  <header class="topbar"><div class="brand"><span class="brand-mark">C</span><span>Cchong 水印</span></div></header>
   <main class="workspace">
     <div class="workspace-grid">
       <div>
         <div class="dropzone" id="dropzone" role="button" tabindex="0" aria-label="选择照片或拖入照片">
           <input id="files" type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif,image/avif,.jpg,.jpeg,.png,.webp,.heic,.heif,.avif" multiple hidden>
-          <div class="plus">+</div><strong>选择照片</strong><span>支持多选，也可以把照片拖到这里</span>
+          <div class="plus">+</div><div><strong>添加照片</strong><span>相册多选 · 也可拖入</span></div>
         </div>
         <section class="preview-panel" aria-label="水印效果预览">
           <div class="preview-head"><strong>实时预览</strong><span id="preview-name">选择照片后显示</span></div>
           <div class="preview-stage" id="preview-stage"><span id="preview-placeholder">选择照片后显示水印效果</span><img id="preview-image" alt="水印预览" hidden><video id="motion-video" playsinline muted loop controls hidden></video><img id="motion-overlay" alt="动态照片水印" hidden></div>
-          <div class="preview-actions"><button id="compare" type="button" disabled>按住查看原图</button><button id="motion-play" type="button" hidden>播放动态照片</button></div>
-          <small>点选照片切换预览；拖动预览图可定位水印。</small>
+          <div class="preview-actions"><button id="rotate-left" type="button">↶ 左转</button><button id="rotate-right" type="button">↷ 右转</button><button id="batch-upright" type="button">整批自动转正</button><button id="auto-upright" type="button">自动转正</button><button id="rotation-reset" type="button">还原方向</button></div><div class="preview-navigation"><button id="preview-prev" type="button" aria-label="上一张">←</button><span id="preview-index">尚未选择照片</span><button id="preview-next" type="button" aria-label="下一张">→</button></div><div class="preview-actions"><button id="compare" type="button" disabled>按住查看原图</button><button id="motion-play" type="button" hidden>播放动态照片</button></div>
         </section>
       </div>
       <div class="settings">
         <div class="settings-head"><h2>水印设置</h2><button id="reset" class="text-btn" type="button">恢复默认</button></div>
         <div class="scope-switch"><button id="scope-all" type="button" class="active">整批设置</button><button id="scope-one" type="button">当前照片</button></div>
-        <p id="scope-note" class="scope-note">调整后应用到整批照片</p>
+        <p id="scope-note" class="scope-note">调整后应用到整批照片</p><button id="inherit" class="text-btn" type="button" hidden>取消单独设置，使用整批设置</button>
         <fieldset><legend>颜色</legend><label><input type="radio" name="color" value="auto" checked><span>自动</span></label><label><input type="radio" name="color" value="white"><span>白色</span></label><label><input type="radio" name="color" value="black"><span>黑色</span></label></fieldset>
-        <div id="controls"></div>
+        <fieldset class="film-mode"><legend>照片类型</legend><label><input type="radio" name="photo-mode" value="digital" checked><span>数码</span></label><label><input type="radio" name="photo-mode" value="film"><span>胶片扫描</span></label></fieldset>
+        <div id="film-fields" hidden><div id="film-recent" class="recent-films" hidden></div>
+          <label for="film-brand">胶卷品牌</label><input id="film-brand" type="text" maxlength="40" list="film-brands" placeholder="选择品牌，或填写英文品牌" autocomplete="off"><datalist id="film-brands"></datalist><small id="film-brand-note"></small><label for="film-stock">胶卷型号</label><input id="film-stock" type="text" maxlength="80" placeholder="搜索英文型号 / 中文名称，或填写英文型号" autocomplete="off" role="combobox" aria-controls="film-results" aria-expanded="false"><div id="film-results" role="listbox" hidden></div>
+          <input id="film-iso" type="hidden" maxlength="80">
+          <label for="film-camera">相机</label><input id="film-camera" type="text" maxlength="80" value="Pentax Espio 125M">
+          <small>中文仅供选择参考；自定义品牌、型号和相机请填写英文。</small>
+        </div>
+        <details id="advanced"><summary>大小与位置<span>按需微调</span></summary><div id="controls"></div></details>
       </div>
     </div>
     <div class="queue-head"><h2>待处理 <span id="count">0</span></h2><button id="clear" class="text-btn" type="button" disabled>清空</button></div>
     <div id="empty" class="empty">还没有选择照片</div>
     <div id="list" class="file-list" aria-live="polite"></div>
-    <div class="action-row"><button id="retry" type="button" hidden>只重试失败照片</button><button id="process" type="button" disabled><span id="process-label">开始处理</span><span id="process-arrow">→</span></button></div>
+    <div class="action-row"><span id="action-count">先添加照片</span><button id="retry" type="button" hidden>只重试失败照片</button><button id="export-upright" type="button">仅导出转正照片</button><button id="process" type="button" disabled><span id="process-label">生成水印照片</span><span id="process-arrow">→</span></button></div>
     <div id="progress" class="progress-track" role="progressbar" aria-label="照片处理进度" hidden><div id="progress-fill"></div></div>
     <div id="status" class="status" role="status" aria-live="polite"></div>
     <div id="downloads" class="download-list" aria-live="polite"></div>

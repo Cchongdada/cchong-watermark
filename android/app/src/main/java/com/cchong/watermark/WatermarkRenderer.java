@@ -41,6 +41,7 @@ final class WatermarkRenderer {
         ExifInterface exif = new ExifInterface(new ByteArrayInputStream(imageBytes));
         Bitmap photo = orient(decoded, exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, 1));
         if (photo != decoded) decoded.recycle();
+        photo = rotate(photo, settings.rotation);
         return renderBitmap(photo, exif, colorMode, settings, photo.getWidth(), photo.getHeight(), false);
     }
 
@@ -73,21 +74,36 @@ final class WatermarkRenderer {
         if (photo != decoded) decoded.recycle();
         int originalWidth = orientation >= 5 && orientation <= 8 ? bounds.outHeight : bounds.outWidth;
         int originalHeight = orientation >= 5 && orientation <= 8 ? bounds.outWidth : bounds.outHeight;
+        photo = rotate(photo, settings.rotation);
+        if (settings.rotation % 180 != 0) { int swap = originalWidth; originalWidth = originalHeight; originalHeight = swap; }
         return renderBitmap(photo, exif, colorMode, settings, originalWidth, originalHeight, true);
+    }
+
+    static Bitmap rotate(Bitmap photo, int angle) {
+        if (angle == 0) return photo;
+        Matrix matrix = new Matrix(); matrix.postRotate(angle);
+        Bitmap result = Bitmap.createBitmap(photo, 0, 0, photo.getWidth(), photo.getHeight(), matrix, true);
+        if (result != photo) photo.recycle();
+        return result;
     }
 
     private Result renderBitmap(Bitmap photo, ExifInterface exif, String colorMode,
                                 WatermarkSettings settings, int originalWidth, int originalHeight, boolean keepOriginal) {
         int width = photo.getWidth(), height = photo.getHeight(), shortSide = Math.min(width, height);
+        if (settings.noWatermark && !keepOriginal) {
+            return new Result(photo, Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888), null);
+        }
         float overall = settings.overall;
         int histogramWidth = Math.max(1, Math.round(shortSide * .30f * overall * settings.histogramWidth));
         int histogramHeight = Math.max(12, Math.round(shortSide * .087f * overall * settings.histogramHeight));
         int gap = Math.max(3, Math.round(shortSide * .007f * overall));
         int metaHeight = Math.round(shortSide * .024f * overall * settings.metadata);
         int brandGap = Math.max(2, Math.round(shortSide * .003f * overall));
-        int brandHeight = Math.round(shortSide * .035f * overall * settings.signature);
+        int brandHeight = Math.round(shortSide * (settings.filmMode ? .02975f : .035f) * overall * settings.signature);
+        if (settings.filmMode && settings.filmText().isEmpty()) { metaHeight = 0; brandGap = 0; }
         int blockHeight = histogramHeight + gap + metaHeight + brandGap + brandHeight;
-        float centerX = Math.max(histogramWidth / 2f, Math.min(width - histogramWidth / 2f, width * settings.x));
+        float blockWidth = histogramWidth;
+        float centerX = Math.max(blockWidth / 2f, Math.min(width - blockWidth / 2f, width * settings.x));
         int left = Math.round(centerX - histogramWidth / 2f);
         int top = Math.max(0, Math.min(height - blockHeight, Math.round(height * settings.y - blockHeight / 2f)));
         int rgb = "black".equals(colorMode) || ("auto".equals(colorMode) && average(photo, left, top, histogramWidth, blockHeight) >= 135)
@@ -131,21 +147,21 @@ final class WatermarkRenderer {
         paint.setStrokeWidth(axis);
         canvas.drawLine(left, baseline, left + histogramWidth, baseline, paint);
 
-        String meta = metadata(exif, originalWidth, originalHeight);
+        String meta = settings.filmMode ? settings.filmText() : metadata(exif, originalWidth, originalHeight);
         Paint text = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.SUBPIXEL_TEXT_FLAG);
         text.setColor(rgb);
         text.setTextAlign(Paint.Align.CENTER);
-        text.setTypeface(manrope);
+        text.setTypeface(settings.filmMode ? cormorant : manrope);
         float metaSize = Math.max(8, Math.round(shortSide * .017f * overall * settings.metadata));
         text.setTextSize(metaSize);
-        while (metaSize > 8 && text.measureText(meta) > histogramWidth * .94f) {
+        while (metaSize > 8 && text.measureText(meta) > (histogramWidth * .94f)) {
             metaSize -= 1;
             text.setTextSize(metaSize);
         }
         float metaTop = top + histogramHeight + gap;
         canvas.drawText(meta, centerX, metaTop - text.getFontMetrics().top, text);
         text.setTypeface(cormorant);
-        text.setTextSize(Math.max(10, Math.round(shortSide * .028f * overall * settings.signature)));
+        text.setTextSize(Math.max(10, Math.round(shortSide * (settings.filmMode ? .0238f : .028f) * overall * settings.signature)));
         float brandTop = metaTop + metaHeight + brandGap;
         canvas.drawText("@Cchong", centerX, brandTop - text.getFontMetrics().top, text);
 

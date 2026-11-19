@@ -99,6 +99,10 @@ public final class ProcessingService extends Service {
                     (float) dimensions.getDouble(0), (float) dimensions.getDouble(1), (float) dimensions.getDouble(2),
                     (float) dimensions.getDouble(3), (float) dimensions.getDouble(4),
                     (float) dimensions.getDouble(5), (float) dimensions.getDouble(6));
+                settings = settings.rotated(item.optInt("rotation",0));
+                settings.noWatermark = item.optBoolean("no_watermark", false);
+                settings.withFilm(item.optBoolean("film_mode",false),item.optString("film_stock",""),
+                    item.optString("film_iso",""),item.optString("film_camera","Pentax Espio 125M"));
                 PhotoProcessor.Saved saved = processor.process(Uri.parse(item.getString("uri")), name,
                     item.optString("color", "auto"), settings);
                 item.put("state", "success"); item.put("output", saved.name);

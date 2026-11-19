@@ -42,7 +42,7 @@ def health():
 
 @app.get("/{asset}")
 def static(asset: str):
-    if asset not in {"style.css", "app.js", "icon.svg", "manifest.webmanifest"}:
+    if asset not in {"style.css", "app.js", "icon.svg", "manifest.webmanifest", "films.json"}:
         raise HTTPException(404)
     return FileResponse(ROOT / "static" / asset)
 
@@ -147,27 +147,57 @@ def parse_settings(raw: str):
             if not math.isfinite(value) or not low <= value <= high:
                 raise ValueError()
             settings[key] = value
+        rotation = supplied.get("rotation", 0)
+        if type(rotation) is not int or rotation not in (0, 90, 180, 270):
+            raise ValueError()
+        settings["rotation"] = rotation
+        settings["no_watermark"] = supplied.get("no_watermark", False) is True
+        settings["film_mode"] = supplied.get("film_mode", False) is True
+        for key in ("film_stock", "film_iso", "film_camera"):
+            value = supplied.get(key, "Pentax Espio 125M" if key == "film_camera" else "")
+            if not isinstance(value, str) or len(value) > 80 or any(ord(c) < 32 for c in value):
+                raise ValueError()
+            settings[key] = value.strip()
         return settings
     except (TypeError, ValueError, json.JSONDecodeError):
         raise HTTPException(400, "无效的水印设置")
 
 
+def watermark_english(value):
+    return re.sub(r"[\u3400-\u9fff\uf900-\ufaff\U00020000-\U000323af]", "", value).strip()
+
+
+def film_metadata(settings):
+    stock = settings.get("film_stock", "").strip()
+    speed = settings.get("film_iso", "").strip()
+    camera = settings.get("film_camera", "").strip()
+    if speed and not speed.upper().startswith(("ISO ", "EI ")):
+        speed = "ISO " + speed
+    return " · ".join(part for part in (watermark_english(stock), watermark_english(camera)) if part)
+
+
 def watermark_overlay(image: Image.Image, color_mode: str, settings=None, original_dimensions=None):
     settings = settings or DEFAULT_SETTINGS
     width, height = image.size
+    if settings.get("no_watermark"):
+        return Image.new("RGBA", image.size, (0, 0, 0, 0))
     short = min(width, height)
     scale = settings["overall"]
     hist_w = max(1, round(short * .30 * scale * settings["histogram_width"]))
     hist_h = max(12, round(short * .087 * scale * settings["histogram_height"]))
     meta_size = max(8, round(short * .017 * scale * settings["metadata"]))
-    meta_font = font(meta_size, weight=500)
-    brand_font = font(max(10, round(short * .028 * scale * settings["signature"])), family="cormorant", weight=600)
+    meta_font = font(meta_size, family="cormorant" if settings.get("film_mode") else "manrope", weight=500)
+    brand_font = font(max(10, round(short * (.0238 if settings.get("film_mode") else .028) * scale * settings["signature"])), family="cormorant", weight=600)
     gap = max(3, round(short * .007 * scale))
     brand_gap = max(2, round(short * .003 * scale))
     meta_h = round(short * .024 * scale * settings["metadata"])
-    brand_h = round(short * .035 * scale * settings["signature"])
+    brand_h = round(short * (.02975 if settings.get("film_mode") else .035) * scale * settings["signature"])
+    if settings.get("film_mode") and not film_metadata(settings):
+        meta_h = 0
+        brand_gap = 0
     block_h = hist_h + gap + meta_h + brand_gap + brand_h
-    center_x = max(hist_w / 2, min(width - hist_w / 2, round(width * settings["x"])))
+    block_w = hist_w
+    center_x = max(block_w / 2, min(width - block_w / 2, round(width * settings["x"])))
     hist_x = round(center_x - hist_w / 2)
     y0 = max(0, min(height - block_h, round(height * settings["y"] - block_h / 2)))
     if color_mode == "auto":
@@ -196,23 +226,29 @@ def watermark_overlay(image: Image.Image, color_mode: str, settings=None, origin
         overlay.alpha_composite(layer, (hist_x, y0))
     draw = ImageDraw.Draw(overlay)
     draw.line((hist_x, y0 + baseline, hist_x + hist_w, y0 + baseline), fill=color, width=axis)
-    meta = metadata(image)
+    meta = film_metadata(settings) if settings.get("film_mode") else metadata(image)
     if original_dimensions and "×" in meta:
         meta = meta.replace(f"{width} × {height}", f"{original_dimensions[0]} × {original_dimensions[1]}")
     meta_y = y0 + hist_h + gap
-    while meta_size > 8 and draw.textbbox((0, 0), meta, font=meta_font)[2] > hist_w * .94:
+    while meta_size > 8 and draw.textbbox((0, 0), meta, font=meta_font)[2] > (hist_w * .94):
         meta_size -= 1
-        meta_font = font(meta_size, weight=500)
+        meta_font = font(meta_size, family="cormorant" if settings.get("film_mode") else "manrope", weight=500)
     draw.text((center_x, meta_y), meta, fill=color, font=meta_font, anchor="mt")
     draw.text((center_x, meta_y + meta_h + brand_gap), "@Cchong", fill=color, font=brand_font, anchor="mt")
     return overlay
+
+
+def rotate_photo(image, settings):
+    angle = (settings or {}).get("rotation", 0)
+    return image.transpose({90: Image.Transpose.ROTATE_270, 180: Image.Transpose.ROTATE_180,
+                            270: Image.Transpose.ROTATE_90}[angle]) if angle else image
 
 
 def still_image(data: bytes, color: str, output_format="JPEG", xmp=None, settings=None):
     with Image.open(io.BytesIO(data)) as source:
         source.load()
         exif = source.getexif()
-        image = ImageOps.exif_transpose(source).convert("RGB")
+        image = rotate_photo(ImageOps.exif_transpose(source).convert("RGB"), settings)
         exif[274] = 1
         image.info["exif"] = exif.tobytes()
         overlay = watermark_overlay(image, color, settings)
@@ -312,12 +348,19 @@ def process_motion(still: bytes, video: bytes, gainmap: bytes, color: str, workd
     video_path = workdir / "input.mp4"
     result_path = workdir / "output.mp4"
     video_path.write_bytes(video)
-    probe = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height", "-of", "json", str(video_path)], capture_output=True, text=True, timeout=30)
+    probe = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height:stream_side_data=rotation:stream_tags=rotate", "-of", "json", str(video_path)], capture_output=True, text=True, timeout=30)
     if probe.returncode:
         raise ValueError("无法读取动态照片中的视频")
     stream = json.loads(probe.stdout)["streams"][0]
-    overlay.resize((stream["width"], stream["height"]), Image.Resampling.LANCZOS).save(overlay_path)
-    command = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", str(video_path), "-i", str(overlay_path), "-filter_complex", "[0:v][1:v]overlay=0:0:format=auto[v]", "-map", "[v]", "-map", "0:a?", "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p", "-c:a", "copy", "-movflags", "+faststart", str(result_path)]
+    angle = (settings or {}).get("rotation", 0)
+    size = (stream["width"], stream["height"])
+    metadata_rotation = next((int(item.get("rotation", 0)) for item in stream.get("side_data_list", []) if "rotation" in item),
+                             int(stream.get("tags", {}).get("rotate", 0)))
+    if (metadata_rotation + angle) % 180:
+        size = size[::-1]
+    overlay.resize(size, Image.Resampling.LANCZOS).save(overlay_path)
+    turn = {0: "null", 90: "transpose=1", 180: "hflip,vflip", 270: "transpose=2"}[angle]
+    command = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", str(video_path), "-i", str(overlay_path), "-filter_complex", f"[0:v]{turn}[turned];[turned][1:v]overlay=0:0:format=auto[v]", "-map", "[v]", "-map", "0:a?", "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p", "-c:a", "copy", "-movflags", "+faststart", str(result_path)]
     done = subprocess.run(command, capture_output=True, text=True, timeout=300)
     if done.returncode:
         raise ValueError("动态视频处理失败：" + done.stderr[-250:])
@@ -352,7 +395,7 @@ async def preview(file: UploadFile = File(...), color: str = Form("auto"), setti
     try:
         with Image.open(io.BytesIO(data)) as source:
             source.load()
-            image = ImageOps.exif_transpose(source).convert("RGB")
+            image = rotate_photo(ImageOps.exif_transpose(source).convert("RGB"), options)
             image.info["exif"] = source.getexif().tobytes()
             dimensions = image.size
             image.thumbnail((1200, 1200), Image.Resampling.LANCZOS)
@@ -383,11 +426,23 @@ async def motion_preview(file: UploadFile = File(...), color: str = Form("auto")
         raise HTTPException(404, "这张照片没有可播放的视频")
     still, video, _ = motion
     if part == "video":
+        angle = options["rotation"]
+        if angle:
+            with tempfile.TemporaryDirectory() as folder:
+                input_path, output_path = Path(folder) / "input.mp4", Path(folder) / "output.mp4"
+                input_path.write_bytes(video)
+                turn = {90: "transpose=1", 180: "hflip,vflip", 270: "transpose=2"}[angle]
+                result = await asyncio.to_thread(subprocess.run, ["ffmpeg", "-v", "error", "-y", "-i", str(input_path),
+                    "-vf", turn, "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-c:a", "copy",
+                    "-movflags", "+faststart", str(output_path)], capture_output=True, timeout=300)
+                if result.returncode:
+                    raise HTTPException(400, "动态预览转向失败")
+                video = output_path.read_bytes()
         return Response(video, media_type="video/mp4")
     try:
         with Image.open(io.BytesIO(still)) as source:
             source.load()
-            image = ImageOps.exif_transpose(source).convert("RGB")
+            image = rotate_photo(ImageOps.exif_transpose(source).convert("RGB"), options)
             dimensions = image.size
             image.info["exif"] = source.getexif().tobytes()
             image.thumbnail((1200, 1200), Image.Resampling.LANCZOS)
@@ -447,6 +502,8 @@ async def process(files: list[UploadFile] = File(...), color: str = Form("auto")
                         raise ValueError("检测到动态照片，但暂时无法读取视频；未导出静态图")
                     output, _ = still_image(data, color, settings=settings)
                     out_name = Path(name).stem + "_Cchong.jpg"
+                if settings["no_watermark"]:
+                    out_name = out_name.replace("_Cchong", "_Upright", 1) if "_Cchong" not in Path(name).stem else Path(name).stem + ("_UprightMP" if motion else "_Upright") + Path(out_name).suffix
                 unique = out_name
                 count = 2
                 while unique in used:
@@ -459,3 +516,21 @@ async def process(files: list[UploadFile] = File(...), color: str = Form("auto")
             errors.append(f"{name}: {str(exc)[:200]}")
     asyncio.create_task(cleanup_job(job_dir))
     return {"items": results, "errors": errors, "expires_in_seconds": 3600}
+
+
+@app.post("/api/orientation")
+async def orientation(file: UploadFile = File(...), settings: str = Form("{}")):
+    options = parse_settings(settings)
+    data = await file.read(MAX_UPLOAD + 1)
+    if len(data) > MAX_UPLOAD:
+        raise HTTPException(413, "照片过大")
+    def recognize():
+        from .orientation import detect
+        with Image.open(io.BytesIO(data)) as source:
+            source.thumbnail((1600,1600))
+            image = rotate_photo(ImageOps.exif_transpose(source).convert("RGB"), options)
+            return detect(image)
+    try:
+        return await asyncio.to_thread(recognize)
+    except Exception as error:
+        raise HTTPException(400, "方向识别失败，请使用手动旋转") from error

@@ -30,15 +30,18 @@ final class VideoWatermarker {
 
     VideoWatermarker(Context activity) { this.activity = activity; }
 
-    void render(File input, File output, Bitmap stillOverlay) throws Exception {
+    void render(File input, File output, Bitmap stillOverlay, int rotation) throws Exception {
         MediaMetadataRetriever probe = new MediaMetadataRetriever();
-        int width, height;
+        int width, height, metadataRotation;
         try {
             probe.setDataSource(input.getAbsolutePath());
             width = Integer.parseInt(probe.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH));
             height = Integer.parseInt(probe.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT));
+            String tag = probe.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION);
+            metadataRotation = tag == null ? 0 : Integer.parseInt(tag);
         } finally { probe.release(); }
         if (width <= 0 || height <= 0) throw new IOException("无法读取动态照片视频尺寸");
+        if ((metadataRotation + rotation) % 180 != 0) { int swap=width; width=height; height=swap; }
         Bitmap videoOverlay = Bitmap.createScaledBitmap(stillOverlay, width, height, true);
         CountDownLatch done = new CountDownLatch(1);
         AtomicReference<Throwable> failure = new AtomicReference<>();
@@ -47,7 +50,10 @@ final class VideoWatermarker {
             try {
                 BitmapOverlay bitmapOverlay = BitmapOverlay.createStaticBitmapOverlay(videoOverlay);
                 OverlayEffect effect = new OverlayEffect(Collections.singletonList(bitmapOverlay));
-                Effects effects = new Effects(Collections.emptyList(), Collections.singletonList(effect));
+                java.util.List<androidx.media3.common.Effect> videoEffects = new java.util.ArrayList<>();
+                if(rotation!=0)videoEffects.add(new androidx.media3.effect.ScaleAndRotateTransformation.Builder().setRotationDegrees(-rotation).build());
+                videoEffects.add(effect);
+                Effects effects = new Effects(Collections.emptyList(), videoEffects);
                 EditedMediaItem media = new EditedMediaItem.Builder(MediaItem.fromUri(Uri.fromFile(input))).setEffects(effects).build();
                 Transformer transformer = new Transformer.Builder(activity).addListener(new Transformer.Listener() {
                     @Override public void onCompleted(Composition composition, ExportResult result) { done.countDown(); }
